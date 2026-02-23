@@ -90,7 +90,7 @@ def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
             s = s.replace(",", ".")
         try:
             return float(s)
-        except:
+        except Exception:
             return None
 
     df["LİSTE FİYATI"] = df["LİSTE FİYATI"].apply(to_num)
@@ -129,26 +129,48 @@ def ensure_fonts_registered():
 
 
 # =========================================
-# PDF (Diagonal Watermark)
+# PDF Watermark (diagonal, full-page feel)
 # =========================================
 def _watermark(canvas, doc, text: str = "KODSAN"):
+    """
+    - Açı artırıldı (45°)
+    - Yazı sayfaya sığacak şekilde font otomatik ayarlanır
+    - Alpha çalışmazsa çok açık gri fallback
+    """
     w, h = A4
     canvas.saveState()
 
-    # Siliklik (alpha desteklenmezse yine de gri kalır)
-    try:
-        canvas.setFillAlpha(0.08)
-    except Exception:
-        pass
+    font_name = "DejaVuSans-Bold"
+    angle = 45
 
-    canvas.setFillColor(colors.lightgrey)
-    canvas.setFont("DejaVuSans-Bold", 160)
+    alpha_ok = True
+    try:
+        canvas.setFillAlpha(0.04)  # çok silik
+    except Exception:
+        alpha_ok = False
+
+    if alpha_ok:
+        canvas.setFillColor(colors.HexColor("#BFBFBF"))
+    else:
+        canvas.setFillColor(colors.HexColor("#EFEFEF"))
+
+    diag = (w * w + h * h) ** 0.5
+    target = diag * 0.72
+
+    font_size = 190
+    while font_size > 80:
+        tw = canvas.stringWidth(text, font_name, font_size)
+        if tw <= target:
+            break
+        font_size -= 2
+
+    canvas.setFont(font_name, font_size)
 
     canvas.translate(w / 2.0, h / 2.0)
-    canvas.rotate(35)
+    canvas.rotate(angle)
 
-    tw = canvas.stringWidth(text, "DejaVuSans-Bold", 160)
-    canvas.drawString(-tw / 2.0, -40, text)
+    tw = canvas.stringWidth(text, font_name, font_size)
+    canvas.drawString(-tw / 2.0, -font_size * 0.15, text)
 
     canvas.restoreState()
 
@@ -186,6 +208,7 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         leading=11,
     )
 
+    # Table cell styles (küçük font + satır kırma)
     cell_model = ParagraphStyle(
         "cell_model",
         parent=styles["Normal"],
@@ -223,7 +246,7 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     story.append(Paragraph("KODSAN TEKLİF", title_style))
     story.append(Spacer(1, 3 * mm))
 
-    # Üst bilgiler (iskonto yazmaz)
+    # Üst bilgiler (iskonto PDF'de yok)
     info_data = [
         ["Tarih", meta["tarih"]],
         ["Geçerlilik", meta["gecerlilik"]],
@@ -261,7 +284,7 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         rows.append(
             [
                 Paragraph(str(r["MODEL"]), cell_model),
-                Paragraph(str(r["AÇIKLAMA"]), cell_desc),
+                Paragraph(str(r["AÇIKLAMA"]), cell_desc),  # satır kırar
                 Paragraph(str(int(r["ADET"])), cell_num),
                 Paragraph(eur_fmt_dec(float(r["BİRİM (EUR)"]), 2), cell_num),
                 Paragraph(eur_fmt_dec(float(r["TOPLAM (EUR)"]), 2), cell_num),
@@ -302,8 +325,11 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         story.append(Paragraph(n, small))
         story.append(Spacer(1, 1.2 * mm))
 
-    doc.build(story, onFirstPage=lambda c, d: _watermark(c, d, "KODSAN"),
-              onLaterPages=lambda c, d: _watermark(c, d, "KODSAN"))
+    doc.build(
+        story,
+        onFirstPage=lambda c, d: _watermark(c, d, "KODSAN"),
+        onLaterPages=lambda c, d: _watermark(c, d, "KODSAN"),
+    )
 
     pdf = buf.getvalue()
     buf.close()
@@ -471,7 +497,12 @@ with colA:
                     break
             if not found:
                 st.session_state.cart.append(
-                    {"MODEL": selected["MODEL"], "AÇIKLAMA": selected["AÇIKLAMA"], "LİSTE FİYATI": list_price, "ADET": int(qty)}
+                    {
+                        "MODEL": selected["MODEL"],
+                        "AÇIKLAMA": selected["AÇIKLAMA"],
+                        "LİSTE FİYATI": list_price,
+                        "ADET": int(qty),
+                    }
                 )
             st.rerun()
 
@@ -530,7 +561,9 @@ with colB:
         lines = []
         for _, r in cart_df.iterrows():
             unit_txt = eur_fmt_dec(float(r["BİRİM (EUR)"]), 2)
-            lines.append(f"{r['MODEL']} / {r['AÇIKLAMA']} / {int(r['ADET'])} ADET / {unit_txt} EUR + KDV")
+            lines.append(
+                f"{r['MODEL']} / {r['AÇIKLAMA']} / {int(r['ADET'])} ADET / {unit_txt} EUR + KDV"
+            )
         st.code("\n".join(lines), language="text")
 
         meta = {
