@@ -9,14 +9,7 @@ import streamlit as st
 # PDF
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.platypus import (
-    SimpleDocTemplate,
-    Table,
-    TableStyle,
-    Paragraph,
-    Spacer,
-    Image as RLImage,
-)
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
@@ -26,9 +19,30 @@ from reportlab.pdfbase.ttfonts import TTFont
 import matplotlib.pyplot as plt
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
+# =========================================
+# CONFIG
+# =========================================
+PREPARERS = {
+    "Emre Orhan": {"email": "emre.orhan@kodsan.com.tr", "telefon": "0 543 659 36 73"},
+    "Fikret Özdemir": {"email": "fikret.ozdemir@kodsan.com.tr", "telefon": "0 542 349 33 99"},
+    "Mert Özen": {"email": "mert.ozen@kodsan.com.tr", "telefon": "0 542 235 33 77"},
+}
+
+NOTES = [
+    "<b>FİYAT :</b> Fiyatlar EUR bazında olup KDV hariçtir.",
+    "<b>DÖVİZ KURU :</b> Fatura tarihindeki TCMB Euro DSK (Döviz Satış Kuru) esas alınarak fatura TÜRK LİRASI üzerinden kesilecek ve ödeme TÜRK LİRASI üzerinden yapılacaktır; gün içerisinde serbest piyasa kuru T.C.M.B’nin belirlemiş olduğu efektif satış kurunu %1 oranında aşmış ise T.C.M.B kuru yerine serbest piyasa kuru geçerli olacaktır.",
+    "<b>FATURA :</b> Kodsan veya Kodsan Bayileri üzerinden faturalandırılacaktır.",
+    "<b>TESLİM ŞEKLİ / GARANTİ :</b> Ankara merkez depomuz teslim. Teklif konusu ürün talimatnamelerine uygun olarak monte edilmiş ve amacı dahilinde kullanılması kaydı ve şartı ile fatura tarihinden itibaren 2 yıl imalat hatalarına karşı garanti kapsamındadır. Kullanıcı ve/veya sistemden kaynaklanan hasarlar garanti kapsamı dışındadır. Müşteri teklife konu olan ürünlerin, yapacağı uygulamada teknik olarak yeterli olduğunu teyit etmektedir.",
+    "<b>SİPARİŞ İPTALİ :</b> Müşteri teslimata hazır ürünü teslim almaktan kaçınamaz, iade edemez.",
+    "<b>OPSİYON TEMERRÜT :</b> Teklifimiz taşıdığı tarihten itibaren 5 gün süre ile geçerlidir.",
+    "<b>ANLAŞMAZLIK :</b> Satışa konu olan ürünlerin bedelinin vade tarihinden sonraki 8 gün içinde ödenmemesi halinde başka ihtara gerek kalmaksızın temerrüde düşmüş kabul edilir ve alıcı bu tarih itibariyle yasal temerrüt faizi ödemekle yükümlüdür. Her türlü anlaşmazlık durumunda ANKARA mahkemeleri ve icra daireleri yetkilidir.",
+    "<b>DEVREYE ALMA HİZMETI :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
+]
+
+
+# =========================================
+# HELPERS
+# =========================================
 def today_tr() -> dt.date:
     return dt.date.today()
 
@@ -36,7 +50,7 @@ def today_tr() -> dt.date:
 def eur_fmt_dec(x: float, decimals: int = 2) -> str:
     if x is None or (isinstance(x, float) and math.isnan(x)):
         return ""
-    s = f"{x:,.{decimals}f}"  # 1,329.50
+    s = f"{x:,.{decimals}f}"
     return s.replace(",", "_").replace(".", ",").replace("_", ".")
 
 
@@ -55,7 +69,6 @@ def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
             col_map[c] = "LİSTE FİYATI"
 
     df = df.rename(columns=col_map)
-
     required = ["MODEL", "AÇIKLAMA", "LİSTE FİYATI"]
     missing = [c for c in required if c not in df.columns]
     if missing:
@@ -91,6 +104,11 @@ def calc_discounted(list_price: float, discount_pct: float) -> float:
 
 
 def ensure_fonts_registered():
+    """
+    Repo'da bulunmalı:
+      fonts/DejaVuSans.ttf
+      fonts/DejaVuSans-Bold.ttf
+    """
     reg_path = os.path.join("fonts", "DejaVuSans.ttf")
     bold_path = os.path.join("fonts", "DejaVuSans-Bold.ttf")
 
@@ -101,56 +119,46 @@ def ensure_fonts_registered():
 
     try:
         pdfmetrics.getFont("DejaVuSans")
-    except:
+    except Exception:
         pdfmetrics.registerFont(TTFont("DejaVuSans", reg_path))
 
     try:
         pdfmetrics.getFont("DejaVuSans-Bold")
-    except:
+    except Exception:
         pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
 
 
-# -----------------------------
-# PDF watermark
-# -----------------------------
-def _on_page_watermark(canvas, doc, watermark_path: str):
-    if not watermark_path or (not os.path.exists(watermark_path)):
-        return
+# =========================================
+# PDF (Diagonal Watermark)
+# =========================================
+def _watermark(canvas, doc, text: str = "KODSAN"):
+    w, h = A4
+    canvas.saveState()
+
+    # Siliklik (alpha desteklenmezse yine de gri kalır)
     try:
-        w, h = A4
-        canvas.saveState()
-        # Hafif filigran
         canvas.setFillAlpha(0.08)
-        canvas.drawImage(
-            watermark_path,
-            0,
-            0,
-            width=w,
-            height=h,
-            preserveAspectRatio=True,
-            mask="auto",
-        )
-        canvas.restoreState()
-    except:
-        # Canvas bazı ortamlarda alpha desteklemezse sessiz geç
+    except Exception:
         pass
+
+    canvas.setFillColor(colors.lightgrey)
+    canvas.setFont("DejaVuSans-Bold", 160)
+
+    canvas.translate(w / 2.0, h / 2.0)
+    canvas.rotate(35)
+
+    tw = canvas.stringWidth(text, "DejaVuSans-Bold", 160)
+    canvas.drawString(-tw / 2.0, -40, text)
+
+    canvas.restoreState()
 
 
 def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     ensure_fonts_registered()
 
-    buffer = io.BytesIO()
-
-    watermark_path = os.path.join("assets", "kodsan.png")
-
-    def on_first(canvas, doc):
-        _on_page_watermark(canvas, doc, watermark_path)
-
-    def on_later(canvas, doc):
-        _on_page_watermark(canvas, doc, watermark_path)
-
+    buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buffer,
+        buf,
         pagesize=A4,
         leftMargin=14 * mm,
         rightMargin=14 * mm,
@@ -212,17 +220,6 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     )
 
     story = []
-
-    # Üstte logo (opsiyonel)
-    logo_path = os.path.join("assets", "kodsan.png")
-    if os.path.exists(logo_path):
-        try:
-            img = RLImage(logo_path, width=50 * mm, height=15 * mm)
-            story.append(img)
-            story.append(Spacer(1, 2 * mm))
-        except:
-            pass
-
     story.append(Paragraph("KODSAN TEKLİF", title_style))
     story.append(Spacer(1, 3 * mm))
 
@@ -256,7 +253,7 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     story.append(info_tbl)
     story.append(Spacer(1, 5 * mm))
 
-    # Ürün tablosu (açıklama satır kırar, adet görünür)
+    # Ürün tablosu
     header = ["Model", "Açıklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
     rows = [header]
 
@@ -295,35 +292,27 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
 
     story.append(prod_tbl)
     story.append(Spacer(1, 4 * mm))
-
     story.append(Paragraph(f"<b>Toplam:</b> {eur_fmt_dec(total, 2)} EUR + KDV", normal))
     story.append(Spacer(1, 3 * mm))
 
     # Notlar
     story.append(Paragraph("<b>NOTLAR</b>", normal))
     story.append(Spacer(1, 1.5 * mm))
-
-    notes = [
-        "<b>FİYAT :</b> Fiyatlar EUR bazında olup KDV hariçtir.",
-        "<b>DÖVİZ KURU :</b> Fatura tarihindeki TCMB Euro DSK (Döviz Satış Kuru) esas alınarak fatura TÜRK LİRASI üzerinden kesilecek ve ödeme TÜRK LİRASI üzerinden yapılacaktır; gün içerisinde serbest piyasa kuru T.C.M.B’nin belirlemiş olduğu efektif satış kurunu %1 oranında aşmış ise T.C.M.B kuru yerine serbest piyasa kuru geçerli olacaktır.",
-        "<b>FATURA :</b> Kodsan veya Kodsan Bayileri üzerinden faturalandırılacaktır.",
-        "<b>TESLİM ŞEKLİ / GARANTİ :</b> Ankara merkez depomuz teslim. Teklif konusu ürün talimatnamelerine uygun olarak monte edilmiş ve amacı dahilinde kullanılması kaydı ve şartı ile fatura tarihinden itibaren 2 yıl imalat hatalarına karşı garanti kapsamındadır. Kullanıcı ve/veya sistemden kaynaklanan hasarlar garanti kapsamı dışındadır. Müşteri teklife konu olan ürünlerin, yapacağı uygulamada teknik olarak yeterli olduğunu teyit etmektedir.",
-        "<b>SİPARİŞ İPTALİ :</b> Müşteri teslimata hazır ürünü teslim almaktan kaçınamaz, iade edemez.",
-        "<b>OPSİYON TEMERRÜT :</b> Teklifimiz taşıdığı tarihten itibaren 5 gün süre ile geçerlidir.",
-        "<b>ANLAŞMAZLIK :</b> Satışa konu olan ürünlerin bedelinin vade tarihinden sonraki 8 gün içinde ödenmemesi halinde başka ihtara gerek kalmaksızın temerrüde düşmüş kabul edilir ve alıcı bu tarih itibariyle yasal temerrüt faizi ödemekle yükümlüdür. Her türlü anlaşmazlık durumunda ANKARA mahkemeleri ve icra daireleri yetkilidir.",
-        "<b>DEVREYE ALMA HİZMETI :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
-    ]
-    for n in notes:
+    for n in NOTES:
         story.append(Paragraph(n, small))
         story.append(Spacer(1, 1.2 * mm))
 
-    doc.build(story, onFirstPage=on_first, onLaterPages=on_later)
+    doc.build(story, onFirstPage=lambda c, d: _watermark(c, d, "KODSAN"),
+              onLaterPages=lambda c, d: _watermark(c, d, "KODSAN"))
 
-    pdf = buffer.getvalue()
-    buffer.close()
+    pdf = buf.getvalue()
+    buf.close()
     return pdf
 
 
+# =========================================
+# PNG output
+# =========================================
 def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> bytes:
     view = cart_df.copy()
     view["BİRİM (EUR)"] = view["BİRİM (EUR)"].map(lambda v: eur_fmt_dec(float(v), 2))
@@ -355,9 +344,9 @@ def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> by
     return buf.getvalue()
 
 
-# -----------------------------
-# Streamlit App
-# -----------------------------
+# =========================================
+# Streamlit UI
+# =========================================
 st.set_page_config(page_title="Teklif Oluşturucu", layout="wide")
 st.title("Teklif Oluşturucu (Web)")
 
@@ -366,13 +355,6 @@ if "cart" not in st.session_state:
 
 if "price_list" not in st.session_state:
     st.session_state.price_list = None
-
-# Hazırlayan havuzu
-PREPARERS = {
-    "Emre Orhan": {"email": "emre.orhan@kodsan.com.tr", "telefon": "0 543 659 36 73"},
-    "Fikret Özdemir": {"email": "fikret.ozdemir@kodsan.com.tr", "telefon": "0 542 349 33 99"},
-    "Mert Özen": {"email": "mert.ozen@kodsan.com.tr", "telefon": "0 542 235 33 77"},
-}
 
 with st.sidebar:
     st.header("Teklif Bilgileri")
@@ -388,6 +370,7 @@ with st.sidebar:
     hazirlayan = st.selectbox("TEKLİFİ HAZIRLAYAN", list(PREPARERS.keys()), index=0)
     email = PREPARERS[hazirlayan]["email"]
     telefon = PREPARERS[hazirlayan]["telefon"]
+
     st.text_input("EMAİL", value=email, disabled=True)
     st.text_input("TELEFON", value=telefon, disabled=True)
 
@@ -488,12 +471,7 @@ with colA:
                     break
             if not found:
                 st.session_state.cart.append(
-                    {
-                        "MODEL": selected["MODEL"],
-                        "AÇIKLAMA": selected["AÇIKLAMA"],
-                        "LİSTE FİYATI": list_price,
-                        "ADET": int(qty),
-                    }
+                    {"MODEL": selected["MODEL"], "AÇIKLAMA": selected["AÇIKLAMA"], "LİSTE FİYATI": list_price, "ADET": int(qty)}
                 )
             st.rerun()
 
@@ -504,9 +482,7 @@ with colB:
         st.info("Sepet boş. Soldan ürün ekleyin.")
     else:
         cart_df = pd.DataFrame(st.session_state.cart)
-        cart_df["BİRİM (EUR)"] = cart_df["LİSTE FİYATI"].apply(
-            lambda p: calc_discounted(float(p), float(iskonto))
-        )
+        cart_df["BİRİM (EUR)"] = cart_df["LİSTE FİYATI"].apply(lambda p: calc_discounted(float(p), float(iskonto)))
         cart_df["TOPLAM (EUR)"] = cart_df["BİRİM (EUR)"] * cart_df["ADET"].astype(int)
         total = float(cart_df["TOPLAM (EUR)"].sum())
 
@@ -554,9 +530,7 @@ with colB:
         lines = []
         for _, r in cart_df.iterrows():
             unit_txt = eur_fmt_dec(float(r["BİRİM (EUR)"]), 2)
-            lines.append(
-                f"{r['MODEL']} / {r['AÇIKLAMA']} / {int(r['ADET'])} ADET / {unit_txt} EUR + KDV"
-            )
+            lines.append(f"{r['MODEL']} / {r['AÇIKLAMA']} / {int(r['ADET'])} ADET / {unit_txt} EUR + KDV")
         st.code("\n".join(lines), language="text")
 
         meta = {
