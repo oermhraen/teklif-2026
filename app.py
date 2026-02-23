@@ -11,7 +11,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 
@@ -24,15 +24,6 @@ import matplotlib.pyplot as plt
 # -----------------------------
 def today_tr():
     return dt.date.today()
-
-
-def eur_fmt(x: float) -> str:
-    """1.329 gibi TR/AB formatında EUR göster (tam sayı)."""
-    if x is None or (isinstance(x, float) and (math.isnan(x))):
-        return ""
-    s = f"{x:,.0f}"  # 1,329
-    s = s.replace(",", "_").replace(".", ",").replace("_", ".")  # 1.329
-    return s
 
 
 def eur_fmt_dec(x: float, decimals: int = 2) -> str:
@@ -81,7 +72,6 @@ def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
             return float(v)
         s = str(v).strip().replace(" ", "")
         if "," in s and "." in s:
-            # TR format varsay: 1.234,56
             s = s.replace(".", "").replace(",", ".")
         else:
             s = s.replace(",", ".")
@@ -113,11 +103,9 @@ def ensure_fonts_registered():
 
     if not os.path.exists(reg_path) or not os.path.exists(bold_path):
         raise FileNotFoundError(
-            "Türkçe karakter için font dosyaları eksik. "
-            "Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
+            "Font dosyaları eksik. Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
         )
 
-    # tekrar register etse de sorun çıkarmasın diye try
     try:
         pdfmetrics.getFont("DejaVuSans")
     except:
@@ -131,33 +119,81 @@ def ensure_fonts_registered():
 
 def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     """
-    meta: teklif üst bilgileri
-    cart_df kolonları: MODEL, AÇIKLAMA, ADET, BİRİM (EUR), TOPLAM (EUR)
-    NOT: PDF içinde iskonto bilgisi yazdırılmıyor.
+    NOT:
+      - Başlık: KODSAN TEKLİF
+      - PDF'de iskonto yazdırılmaz
+      - Tablo fontu küçük + açıklama satır kırar (adet görünür)
+      - Notlar eklenir
     """
     ensure_fonts_registered()
 
     buffer = io.BytesIO()
-
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=18 * mm,
-        rightMargin=18 * mm,
-        topMargin=15 * mm,
-        bottomMargin=15 * mm,
-        title="Teklif"
+        leftMargin=14 * mm,
+        rightMargin=14 * mm,
+        topMargin=12 * mm,
+        bottomMargin=12 * mm,
+        title="KODSAN TEKLİF",
     )
 
     styles = getSampleStyleSheet()
-    normal = styles["Normal"]
-    h = styles["Heading2"]
-    normal.fontName = "DejaVuSans"
-    h.fontName = "DejaVuSans-Bold"
+
+    title_style = ParagraphStyle(
+        "title_style",
+        parent=styles["Heading2"],
+        fontName="DejaVuSans-Bold",
+        fontSize=14,
+        leading=16,
+        spaceAfter=6,
+    )
+
+    normal = ParagraphStyle(
+        "normal",
+        parent=styles["Normal"],
+        fontName="DejaVuSans",
+        fontSize=9,
+        leading=11,
+    )
+
+    # Tablo hücresi stilleri (kritik: küçük font + satır kırma)
+    cell_model = ParagraphStyle(
+        "cell_model",
+        parent=styles["Normal"],
+        fontName="DejaVuSans",
+        fontSize=7.4,
+        leading=9,
+    )
+
+    cell_desc = ParagraphStyle(
+        "cell_desc",
+        parent=styles["Normal"],
+        fontName="DejaVuSans",
+        fontSize=7.2,
+        leading=9,
+    )
+
+    cell_num = ParagraphStyle(
+        "cell_num",
+        parent=styles["Normal"],
+        fontName="DejaVuSans",
+        fontSize=7.4,
+        leading=9,
+        alignment=2,  # RIGHT
+    )
+
+    small = ParagraphStyle(
+        "small",
+        parent=styles["BodyText"],
+        fontName="DejaVuSans",
+        fontSize=8.2,
+        leading=10,
+    )
 
     story = []
-    story.append(Paragraph("TEKLİF", h))
-    story.append(Spacer(1, 6 * mm))
+    story.append(Paragraph("KODSAN TEKLİF", title_style))
+    story.append(Spacer(1, 4 * mm))
 
     # Üst Bilgiler (iskonto satırı YOK)
     info_data = [
@@ -170,52 +206,85 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
         ["E-mail", meta["email"]],
         ["Telefon", meta["telefon"]],
     ]
-
-    info_tbl = Table(info_data, colWidths=[35 * mm, 135 * mm])
-    info_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (1, 1), colors.whitesmoke),
-        ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
-        ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
-    ]))
+    info_tbl = Table(info_data, colWidths=[34 * mm, 150 * mm])
+    info_tbl.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+                ("BACKGROUND", (0, 0), (0, -1), colors.whitesmoke),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
     story.append(info_tbl)
-    story.append(Spacer(1, 8 * mm))
+    story.append(Spacer(1, 5 * mm))
 
-    # Ürün Tablosu
-    table_header = ["Model", "Açıklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
-    rows = [table_header]
+    # Ürün Tablosu (AÇIKLAMA Paragraph => satır kırar)
+    header = ["Model", "Açıklama", "Adet", "Birim (EUR)", "Tutar (EUR)"]
+    rows = [header]
 
     for _, r in cart_df.iterrows():
-        rows.append([
-            str(r["MODEL"]),
-            str(r["AÇIKLAMA"]),
-            str(int(r["ADET"])),
-            eur_fmt_dec(float(r["BİRİM (EUR)"]), 2),
-            eur_fmt_dec(float(r["TOPLAM (EUR)"]), 2),
-        ])
+        model_p = Paragraph(str(r["MODEL"]), cell_model)
+        desc_p = Paragraph(str(r["AÇIKLAMA"]), cell_desc)
+        adet_p = Paragraph(str(int(r["ADET"])), cell_num)
+        birim_p = Paragraph(eur_fmt_dec(float(r["BİRİM (EUR)"]), 2), cell_num)
+        tutar_p = Paragraph(eur_fmt_dec(float(r["TOPLAM (EUR)"]), 2), cell_num)
 
-    prod_tbl = Table(rows, colWidths=[40 * mm, 78 * mm, 14 * mm, 28 * mm, 28 * mm])
-    prod_tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
-        ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTNAME", (0, 1), (-1, -1), "DejaVuSans"),
-        ("FONTSIZE", (0, 1), (-1, -1), 8.5),
-        ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (2, 1), (2, -1), "CENTER"),
-        ("ALIGN", (3, 1), (4, -1), "RIGHT"),
-    ]))
+        rows.append([model_p, desc_p, adet_p, birim_p, tutar_p])
+
+    # Kolon genişlikleri (AÇIKLAMA geniş, ADET sabit dar)
+    prod_tbl = Table(
+        rows,
+        colWidths=[36 * mm, 88 * mm, 10 * mm, 25 * mm, 25 * mm],
+        repeatRows=1,
+    )
+    prod_tbl.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
+                ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
+                ("FONTSIZE", (0, 0), (-1, 0), 8.2),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+                ("ALIGN", (3, 1), (4, -1), "RIGHT"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 3),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+                ("TOPPADDING", (0, 0), (-1, -1), 2),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+            ]
+        )
+    )
 
     story.append(prod_tbl)
-    story.append(Spacer(1, 6 * mm))
+    story.append(Spacer(1, 4 * mm))
 
     story.append(Paragraph(f"<b>Toplam:</b> {eur_fmt_dec(total, 2)} EUR + KDV", normal))
-    story.append(Spacer(1, 2 * mm))
-    story.append(Paragraph("Not: Fiyatlar EUR bazında olup KDV hariçtir.", normal))
+    story.append(Spacer(1, 3 * mm))
+
+    # --- NOTLAR ---
+    story.append(Paragraph("<b>NOTLAR</b>", normal))
+    story.append(Spacer(1, 1.5 * mm))
+
+    notes = [
+        "<b>DÖVİZ KURU :</b> Fatura tarihindeki TCMB Euro DSK (Döviz Satış Kuru) esas alınarak fatura TÜRK LİRASI üzerinden kesilecek ve ödeme TÜRK LİRASI üzerinden yapılacaktır; gün içerisinde serbest piyasa kuru T.C.M.B’nin belirlemiş olduğu efektif satış kurunu %1 oranında aşmış ise T.C.M.B kuru yerine serbest piyasa kuru geçerli olacaktır.",
+        "<b>FATURA :</b> Kodsan veya Kodsan Bayileri üzerinden faturalandırılacaktır.",
+        "<b>TESLİM ŞEKLİ / GARANTİ :</b> Ankara merkez depomuz teslim. Teklif konusu ürün talimatnamelerine uygun olarak monte edilmiş ve amacı dahilinde kullanılması kaydı ve şartı ile fatura tarihinden itibaren 2 yıl imalat hatalarına karşı garanti kapsamındadır. Kullanıcı ve/veya sistemden kaynaklanan hasarlar garanti kapsamı dışındadır. Müşteri teklife konu olan ürünlerin, yapacağı uygulamada teknik olarak yeterli olduğunu teyit etmektedir.",
+        "<b>SİPARİŞ İPTALİ :</b> Müşteri teslimata hazır ürünü teslim almaktan kaçınamaz, iade edemez.",
+        "<b>OPSİYON TEMERRÜT :</b> Teklifimiz taşıdığı tarihten itibaren 5 gün süre ile geçerlidir.",
+        "<b>ANLAŞMAZLIK :</b> Satışa konu olan ürünlerin bedelinin vade tarihinden sonraki 8 gün içinde ödenmemesi halinde başka ihtara gerek kalmaksızın temerrüde düşmüş kabul edilir ve alıcı bu tarih itibariyle yasal temerrüt faizi ödemekle yükümlüdür. Her türlü anlaşmazlık durumunda ANKARA mahkemeleri ve icra daireleri yetkilidir.",
+        "<b>DEVREYE ALMA HİZMETİ :</b> Türkiye sınırları içindeki cihazların devreye alma işlemlerinin Kodsan Yetkili Servisleri tarafından yapılması zorunludur. Devreye alma işlemi yapılmayan cihazlar garanti şartlarından yararlanamaz. Devreye alma işlemi ÜCRETSİZ olup 444 50 39 nolu numarayı arayınız.",
+    ]
+
+    for n in notes:
+        story.append(Paragraph(n, small))
+        story.append(Spacer(1, 1.2 * mm))
 
     doc.build(story)
     pdf = buffer.getvalue()
@@ -270,12 +339,12 @@ if "cart" not in st.session_state:
 if "price_list" not in st.session_state:
     st.session_state.price_list = None
 
-# Sidebar - Teklif üst bilgileri
 with st.sidebar:
     st.header("Teklif Bilgileri")
 
     tarih = today_tr()
-    gecerlilik = tarih + dt.timedelta(days=7)
+    # 5 gün geçerlilik
+    gecerlilik = tarih + dt.timedelta(days=5)
 
     firma = st.text_input("FİRMA İSMİ", value="")
     yetkili = st.text_input("YETKİLİ İSMİ", value="")
@@ -287,7 +356,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(f"Tarih: {tarih.strftime('%d.%m.%Y')}")
-    st.caption(f"Geçerlilik: {gecerlilik.strftime('%d.%m.%Y')} (7 gün)")
+    st.caption(f"Geçerlilik: {gecerlilik.strftime('%d.%m.%Y')} (5 gün)")
 
     st.divider()
     st.subheader("Fiyat Listesi")
@@ -306,22 +375,19 @@ with st.sidebar:
             st.session_state.price_list = None
             st.error(f"Fiyat listesi okunamadı: {e}")
 
-    if st.session_state.price_list is None:
-        if os.path.exists("price_list.csv"):
-            try:
-                df_pl = pd.read_csv("price_list.csv")
-                df_pl = normalize_price_list(df_pl)
-                st.session_state.price_list = df_pl
-                st.info("price_list.csv kullanılıyor.")
-            except Exception as e:
-                st.warning(f"price_list.csv okunamadı: {e}")
+    if st.session_state.price_list is None and os.path.exists("price_list.csv"):
+        try:
+            df_pl = pd.read_csv("price_list.csv")
+            df_pl = normalize_price_list(df_pl)
+            st.session_state.price_list = df_pl
+            st.info("price_list.csv kullanılıyor.")
+        except Exception as e:
+            st.warning(f"price_list.csv okunamadı: {e}")
 
     if st.session_state.price_list is None:
         demo = pd.DataFrame([
-            {"MODEL": "KSH-0800-V5.1", "AÇIKLAMA": "SOLAR & ISI POMPASI BOYLER - ÇİFT SERPANTİNLİ 800 LİTRE - 10 BAR", "LİSTE FİYATI": 2215},
-            {"MODEL": "KSH-1000-V5.1", "AÇIKLAMA": "SOLAR & ISI POMPASI BOYLER - ÇİFT SERPANTİNLİ 1000 LİTRE - 10 BAR", "LİSTE FİYATI": 2468},
-            {"MODEL": "KBS-B-0800-V5.1", "AÇIKLAMA": "TEK SERPANTİNLİ BOYLER 800 LİTRE - BASIC 10 BAR", "LİSTE FİYATI": 1494},
-            {"MODEL": "KBS-B-1000-V5.1", "AÇIKLAMA": "TEK SERPANTİNLİ BOYLER 1000 LİTRE - BASIC 10 BAR", "LİSTE FİYATI": 1612},
+            {"MODEL": "KSH-0300-V5.1", "AÇIKLAMA": "SOLAR & ISI POMPASI BOYLER - ÇİFT SERPANTİNLİ 300 LİTRE - 10 BAR", "LİSTE FİYATI": 1166},
+            {"MODEL": "KEB-0200-232-3-0", "AÇIKLAMA": "ELEKTRİKLİ BOYLER 200 LİTRE - 2X3KW MONOFAZE - PANOSUZ", "LİSTE FİYATI": 551},
         ])
         st.session_state.price_list = demo
         st.warning("Demo fiyat listesi aktif. Kendi listenizi yükleyin veya repo'ya price_list.csv ekleyin.")
@@ -330,7 +396,6 @@ with st.sidebar:
     if st.button("Sepeti sıfırla", use_container_width=True):
         st.session_state.cart = []
         st.rerun()
-
 
 pl = st.session_state.price_list.copy()
 
@@ -349,7 +414,7 @@ with colA:
         ].copy()
 
     filtered["LABEL"] = filtered.apply(
-        lambda r: f"{r['MODEL']} | {r['AÇIKLAMA']} | {eur_fmt(r['LİSTE FİYATI'])} EUR",
+        lambda r: f"{r['MODEL']} | {r['AÇIKLAMA']} | {eur_fmt_dec(r['LİSTE FİYATI'], 2)} EUR",
         axis=1
     )
 
@@ -395,7 +460,6 @@ with colB:
         st.info("Sepet boş. Soldan ürün ekleyin.")
     else:
         cart_df = pd.DataFrame(st.session_state.cart)
-
         cart_df["BİRİM (EUR)"] = cart_df["LİSTE FİYATI"].apply(lambda p: calc_discounted(float(p), float(iskonto)))
         cart_df["TOPLAM (EUR)"] = cart_df["BİRİM (EUR)"] * cart_df["ADET"].astype(int)
         total = float(cart_df["TOPLAM (EUR)"].sum())
@@ -459,9 +523,9 @@ with colB:
 
         pdf_bytes = build_pdf_bytes(meta, cart_df, total)
         st.download_button(
-            label="PDF indir (teklif)",
+            label="PDF indir (KODSAN TEKLİF)",
             data=pdf_bytes,
-            file_name=f"Teklif_{meta['firma'].replace(' ', '_')}_{meta['tarih'].replace('.', '-')}.pdf",
+            file_name=f"Kodsan_Teklif_{meta['firma'].replace(' ', '_')}_{meta['tarih'].replace('.', '-')}.pdf",
             mime="application/pdf",
             use_container_width=True,
         )
