@@ -9,11 +9,11 @@ import streamlit as st
 # PDF
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 # PNG (tablolu görsel çıktı)
 import matplotlib.pyplot as plt
@@ -23,35 +23,36 @@ import matplotlib.pyplot as plt
 # Helpers
 # -----------------------------
 def today_tr():
-    # Streamlit Cloud genelde UTC çalışır; tarih alanında sapma olmasın diye sadece "bugün" mantığı yeterli.
-    # İsterseniz timezone-aware kütüphane eklenebilir.
     return dt.date.today()
 
+
 def eur_fmt(x: float) -> str:
-    """1.329 gibi TR/AB formatında EUR göster."""
+    """1.329 gibi TR/AB formatında EUR göster (tam sayı)."""
     if x is None or (isinstance(x, float) and (math.isnan(x))):
         return ""
     s = f"{x:,.0f}"  # 1,329
     s = s.replace(",", "_").replace(".", ",").replace("_", ".")  # 1.329
     return s
 
+
 def eur_fmt_dec(x: float, decimals: int = 2) -> str:
+    """1.329,50 gibi TR/AB formatında EUR göster."""
     if x is None or (isinstance(x, float) and (math.isnan(x))):
         return ""
     s = f"{x:,.{decimals}f}"  # 1,329.50
     s = s.replace(",", "_").replace(".", ",").replace("_", ".")  # 1.329,50
     return s
 
+
 def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
     """
     Beklenen kolonlar:
       MODEL | AÇIKLAMA | LİSTE FİYATI
-    Excel'den farklı adlar gelirse buradan maplenir.
+    Excel'den farklı adlar gelirse maplenir.
     """
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
 
-    # olası kolon isimleri
     col_map = {}
     for c in df.columns:
         uc = c.upper()
@@ -59,7 +60,7 @@ def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
             col_map[c] = "MODEL"
         elif uc in ["AÇIKLAMA", "ACIKLAMA", "ÜRÜN AÇIKLAMASI", "URUN ACIKLAMASI", "DESCRIPTION"]:
             col_map[c] = "AÇIKLAMA"
-        elif uc in ["LİSTE FİYATI", "LISTE FIYATI", "FİYAT", "FIYAT", "PRICE", "LİSTE FİYAT"]:
+        elif uc in ["LİSTE FİYATI", "LISTE FIYATI", "FİYAT", "FIYAT", "PRICE", "LİSTE FİYAT", "LISTE FIYAT"]:
             col_map[c] = "LİSTE FİYATI"
 
     df = df.rename(columns=col_map)
@@ -73,20 +74,16 @@ def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
     df["MODEL"] = df["MODEL"].astype(str).str.strip()
     df["AÇIKLAMA"] = df["AÇIKLAMA"].astype(str).str.strip()
 
-    # fiyatı sayıya çevir
     def to_num(v):
         if pd.isna(v):
             return None
         if isinstance(v, (int, float)):
             return float(v)
-        s = str(v).strip()
-        # 1.234,56 veya 1234,56 veya 1234.56 yakala
-        s = s.replace(" ", "")
+        s = str(v).strip().replace(" ", "")
         if "," in s and "." in s:
-            # TR format varsayalım: 1.234,56
+            # TR format varsay: 1.234,56
             s = s.replace(".", "").replace(",", ".")
         else:
-            # tek ayraç varsa virgülü noktaya çevir
             s = s.replace(",", ".")
         try:
             return float(s)
@@ -99,14 +96,47 @@ def normalize_price_list(df: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
+
 def calc_discounted(list_price: float, discount_pct: float) -> float:
     return list_price * (1.0 - (discount_pct / 100.0))
+
+
+def ensure_fonts_registered():
+    """
+    PDF'de Türkçe karakter için TTF font göm.
+    Repo'da şu dosyalar olmalı:
+      fonts/DejaVuSans.ttf
+      fonts/DejaVuSans-Bold.ttf
+    """
+    reg_path = os.path.join("fonts", "DejaVuSans.ttf")
+    bold_path = os.path.join("fonts", "DejaVuSans-Bold.ttf")
+
+    if not os.path.exists(reg_path) or not os.path.exists(bold_path):
+        raise FileNotFoundError(
+            "Türkçe karakter için font dosyaları eksik. "
+            "Repo'ya fonts/DejaVuSans.ttf ve fonts/DejaVuSans-Bold.ttf ekleyin."
+        )
+
+    # tekrar register etse de sorun çıkarmasın diye try
+    try:
+        pdfmetrics.getFont("DejaVuSans")
+    except:
+        pdfmetrics.registerFont(TTFont("DejaVuSans", reg_path))
+
+    try:
+        pdfmetrics.getFont("DejaVuSans-Bold")
+    except:
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+
 
 def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     """
     meta: teklif üst bilgileri
     cart_df kolonları: MODEL, AÇIKLAMA, ADET, BİRİM (EUR), TOPLAM (EUR)
+    NOT: PDF içinde iskonto bilgisi yazdırılmıyor.
     """
+    ensure_fonts_registered()
+
     buffer = io.BytesIO()
 
     doc = SimpleDocTemplate(
@@ -122,28 +152,30 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     styles = getSampleStyleSheet()
     normal = styles["Normal"]
     h = styles["Heading2"]
+    normal.fontName = "DejaVuSans"
+    h.fontName = "DejaVuSans-Bold"
 
     story = []
     story.append(Paragraph("TEKLİF", h))
     story.append(Spacer(1, 6 * mm))
 
-    # Üst Bilgiler (2 kolonlu tablo)
+    # Üst Bilgiler (iskonto satırı YOK)
     info_data = [
         ["Tarih", meta["tarih"]],
         ["Geçerlilik", meta["gecerlilik"]],
         ["Firma İsmi", meta["firma"]],
         ["Yetkili İsmi", meta["yetkili"]],
         ["Proje İsmi", meta["proje"]],
-        ["İskonto Oranı", f"%{meta['iskonto']}"],
         ["Teklifi Hazırlayan", meta["hazirlayan"]],
         ["E-mail", meta["email"]],
         ["Telefon", meta["telefon"]],
     ]
+
     info_tbl = Table(info_data, colWidths=[35 * mm, 135 * mm])
     info_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (1, 1), colors.whitesmoke),
         ("TEXTCOLOR", (0, 0), (-1, -1), colors.black),
-        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 0), (-1, -1), "DejaVuSans"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -168,9 +200,9 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     prod_tbl = Table(rows, colWidths=[40 * mm, 78 * mm, 14 * mm, 28 * mm, 28 * mm])
     prod_tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F2F2F2")),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, 0), "DejaVuSans-Bold"),
         ("FONTSIZE", (0, 0), (-1, 0), 9),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTNAME", (0, 1), (-1, -1), "DejaVuSans"),
         ("FONTSIZE", (0, 1), (-1, -1), 8.5),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -190,17 +222,18 @@ def build_pdf_bytes(meta: dict, cart_df: pd.DataFrame, total: float) -> bytes:
     buffer.close()
     return pdf
 
+
 def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> bytes:
     """
-    Ekran görüntüsü mantığı için: tabloyu PNG'e basıp indirilebilir yapıyoruz.
+    Tabloyu PNG'e basıp indirilebilir yapar.
+    NOT: Başlıkta iskonto yazdırmıyoruz.
     """
-    # Görsel için daha kompakt dataframe
     view = cart_df.copy()
     view["BİRİM (EUR)"] = view["BİRİM (EUR)"].map(lambda v: eur_fmt_dec(float(v), 2))
     view["TOPLAM (EUR)"] = view["TOPLAM (EUR)"].map(lambda v: eur_fmt_dec(float(v), 2))
     view["ADET"] = view["ADET"].astype(int).astype(str)
 
-    title = f"{meta['firma']} | {meta['proje']} | % {meta['iskonto']} iskonto | Toplam: {eur_fmt_dec(total, 2)} EUR + KDV"
+    title = f"{meta['firma']} | {meta['proje']} | Toplam: {eur_fmt_dec(total, 2)} EUR + KDV"
 
     fig_h = 1.2 + 0.35 * max(1, len(view))
     fig, ax = plt.subplots(figsize=(12, fig_h))
@@ -229,12 +262,10 @@ def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> by
 # Streamlit App
 # -----------------------------
 st.set_page_config(page_title="Teklif Oluşturucu", layout="wide")
-
 st.title("Teklif Oluşturucu (Web)")
 
-# Session state
 if "cart" not in st.session_state:
-    st.session_state.cart = []  # list of dict rows
+    st.session_state.cart = []
 
 if "price_list" not in st.session_state:
     st.session_state.price_list = None
@@ -275,7 +306,6 @@ with st.sidebar:
             st.session_state.price_list = None
             st.error(f"Fiyat listesi okunamadı: {e}")
 
-    # Local fallback
     if st.session_state.price_list is None:
         if os.path.exists("price_list.csv"):
             try:
@@ -286,7 +316,6 @@ with st.sidebar:
             except Exception as e:
                 st.warning(f"price_list.csv okunamadı: {e}")
 
-    # Built-in minimal fallback for demo
     if st.session_state.price_list is None:
         demo = pd.DataFrame([
             {"MODEL": "KSH-0800-V5.1", "AÇIKLAMA": "SOLAR & ISI POMPASI BOYLER - ÇİFT SERPANTİNLİ 800 LİTRE - 10 BAR", "LİSTE FİYATI": 2215},
@@ -303,7 +332,6 @@ with st.sidebar:
         st.rerun()
 
 
-# Main layout
 pl = st.session_state.price_list.copy()
 
 colA, colB = st.columns([1.1, 1.2], gap="large")
@@ -320,8 +348,10 @@ with colA:
             pl["AÇIKLAMA"].str.upper().str.contains(qs, na=False)
         ].copy()
 
-    # seçim listesi: "MODEL | AÇIKLAMA (fiyat)"
-    filtered["LABEL"] = filtered.apply(lambda r: f"{r['MODEL']} | {r['AÇIKLAMA']} | {eur_fmt(r['LİSTE FİYATI'])} EUR", axis=1)
+    filtered["LABEL"] = filtered.apply(
+        lambda r: f"{r['MODEL']} | {r['AÇIKLAMA']} | {eur_fmt(r['LİSTE FİYATI'])} EUR",
+        axis=1
+    )
 
     if len(filtered) == 0:
         st.info("Arama kriterine uygun ürün yok.")
@@ -343,7 +373,6 @@ with colA:
         st.write(f"**İskontolu birim fiyat:** {eur_fmt_dec(unit, 2)} EUR + KDV")
 
         if st.button("Sepete ekle", type="primary", use_container_width=True):
-            # Aynı model varsa adet arttır
             found = False
             for r in st.session_state.cart:
                 if r["MODEL"] == selected["MODEL"]:
@@ -359,7 +388,6 @@ with colA:
                 })
             st.rerun()
 
-
 with colB:
     st.subheader("Sepet / Teklif Kalemleri")
 
@@ -368,13 +396,10 @@ with colB:
     else:
         cart_df = pd.DataFrame(st.session_state.cart)
 
-        # hesaplar
         cart_df["BİRİM (EUR)"] = cart_df["LİSTE FİYATI"].apply(lambda p: calc_discounted(float(p), float(iskonto)))
         cart_df["TOPLAM (EUR)"] = cart_df["BİRİM (EUR)"] * cart_df["ADET"].astype(int)
-
         total = float(cart_df["TOPLAM (EUR)"].sum())
 
-        # editör: adet değiştir / sil
         edit_df = cart_df[["MODEL", "AÇIKLAMA", "ADET", "BİRİM (EUR)", "TOPLAM (EUR)"]].copy()
         edit_df["SİL"] = False
 
@@ -395,7 +420,6 @@ with colB:
         c1, c2 = st.columns([1, 1])
         with c1:
             if st.button("Değişiklikleri uygula", use_container_width=True):
-                # adet güncelle + sil
                 keep = []
                 for _, r in edited.iterrows():
                     if bool(r.get("SİL", False)):
@@ -414,7 +438,6 @@ with colB:
 
         st.divider()
 
-        # Tek satır çıktı (senin örneğin gibi)
         st.markdown("**Satır formatı (müşteriye kopyala-yapıştır)**")
         lines = []
         for _, r in cart_df.iterrows():
@@ -428,13 +451,12 @@ with colB:
             "firma": firma.strip() or "-",
             "yetkili": yetkili.strip() or "-",
             "proje": proje.strip() or "-",
-            "iskonto": float(iskonto),
+            "iskonto": float(iskonto),  # hesap için duruyor, PDF'de yazdırmıyoruz
             "hazirlayan": hazirlayan.strip() or "-",
             "email": email.strip() or "-",
             "telefon": telefon.strip() or "-",
         }
 
-        # PDF
         pdf_bytes = build_pdf_bytes(meta, cart_df, total)
         st.download_button(
             label="PDF indir (teklif)",
@@ -444,7 +466,6 @@ with colB:
             use_container_width=True,
         )
 
-        # PNG
         png_bytes = build_table_png_bytes(cart_df, meta, total)
         st.download_button(
             label="PNG indir (ekran görüntüsü gibi)",
