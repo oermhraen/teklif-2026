@@ -391,7 +391,7 @@ with st.sidebar:
     firma = st.text_input("FİRMA İSMİ", value="")
     yetkili = st.text_input("YETKİLİ İSMİ", value="")
     proje = st.text_input("PROJE İSMİ", value="")
-    iskonto = st.number_input("İSKONTO ORANI (%)", min_value=0.0, max_value=100.0, value=40.0, step=0.5)
+    iskonto = st.number_input("İSKONTO ORANI (%)", min_value=0.0, max_value=100.0, value=35.0, step=0.5)
 
     hazirlayan = st.selectbox("TEKLİFİ HAZIRLAYAN", list(PREPARERS.keys()), index=0)
     email = PREPARERS[hazirlayan]["email"]
