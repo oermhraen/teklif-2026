@@ -373,8 +373,11 @@ def build_table_png_bytes(cart_df: pd.DataFrame, meta: dict, total: float) -> by
 # =========================================
 # Streamlit UI
 # =========================================
-st.set_page_config(page_title="Teklif Oluşturucu", layout="wide")
-st.title("Teklif Oluşturucu (Web)")
+st.set_page_config(
+    page_title="Teklif Oluşturucu",
+    page_icon="📄",
+    layout="wide"
+)
 
 if "cart" not in st.session_state:
     st.session_state.cart = []
