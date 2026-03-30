@@ -31,7 +31,7 @@ PREPARERS = {
 NOTES = [
     "<b>FİYAT :</b> Fiyatlar EUR bazında olup KDV hariçtir.",
     "<b>DÖVİZ KURU :</b> Fatura tarihindeki TCMB Euro DSK (Döviz Satış Kuru) esas alınarak fatura TÜRK LİRASI üzerinden kesilecek ve ödeme TÜRK LİRASI üzerinden yapılacaktır; gün içerisinde serbest piyasa kuru T.C.M.B’nin belirlemiş olduğu efektif satış kurunu %1 oranında aşmış ise T.C.M.B kuru yerine serbest piyasa kuru geçerli olacaktır.",
-    "<b>FATURA :</b> Kodsan veya Kodsan Bayileri üzerinden faturalandırılacaktır.",
+    "<b>FATURA :</b> Kodsan Bayileri üzerinden faturalandırılacaktır.",
     "<b>TESLİM ŞEKLİ / GARANTİ :</b> Ankara merkez depomuz teslim. Teklif konusu ürün talimatnamelerine uygun olarak monte edilmiş ve amacı dahilinde kullanılması kaydı ve şartı ile fatura tarihinden itibaren 2 yıl imalat hatalarına karşı garanti kapsamındadır. Kullanıcı ve/veya sistemden kaynaklanan hasarlar garanti kapsamı dışındadır. Müşteri teklife konu olan ürünlerin, yapacağı uygulamada teknik olarak yeterli olduğunu teyit etmektedir.",
     "<b>SİPARİŞ İPTALİ :</b> Müşteri teslimata hazır ürünü teslim almaktan kaçınamaz, iade edemez.",
     "<b>OPSİYON TEMERRÜT :</b> Teklifimiz taşıdığı tarihten itibaren 5 gün süre ile geçerlidir.",
